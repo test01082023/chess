@@ -1,0 +1,1432 @@
+```yaml
+project: <chess>
+  idea: "A complete chess game implementation with AI opponent, move validation, and game state management"
+  
+  requirements: |
+    Functional:
+    - Complete chess rule implementation (castling, en passant, promotion)
+    - Move validation and legal move generation
+    - Check/checkmate/stalemate detection
+    - AI opponent with configurable difficulty (minimax with alpha-beta pruning)
+    - Save/load game functionality
+    - Move history and undo/redo
+    - FEN notation support
+    
+    Non-functional:
+    - Response time < 1s for AI moves at depth 4
+    - Support for standard PGN format
+    - Modular design for easy UI integration
+    - Thread-safe for concurrent games
+  
+  architecture: |
+    Layers:
+    1. Core Engine Layer
+       - Board representation (8x8 array + bitboards for optimization)
+       - Piece classes with movement rules
+       - Game state manager
+    
+    2. Rules Engine Layer
+       - Move validator
+       - Legal move generator
+       - Special moves handler
+    
+    3. AI Layer
+       - Minimax algorithm
+       - Position evaluator
+       - Opening book integration
+    
+    4. Interface Layer
+       - CLI interface
+       - API endpoints for web/GUI
+       - Game serialization
+  
+  mermaid: |
+    graph TD
+      A[User Input] --> B[Game Controller]
+      B --> C[Move Validator]
+      C --> D[Board State]
+      D --> E[Legal Move Generator]
+      E --> F{Is AI Turn?}
+      F -->|Yes| G[AI Engine]
+      G --> H[Minimax Search]
+      H --> I[Position Evaluator]
+      I --> J[Best Move]
+      J --> D
+      F -->|No| K[Execute Move]
+      K --> D
+      D --> L[Check Game Status]
+      L --> M{Game Over?}
+      M -->|Yes| N[Display Result]
+      M -->|No| O[Next Turn]
+      O --> A
+  
+  pseudocode: |
+    CLASS ChessBoard:
+      board[8][8]
+      current_player
+      castling_rights
+      en_passant_target
+      halfmove_clock
+      fullmove_number
+      
+      FUNCTION make_move(from, to):
+        piece = board[from]
+        IF not is_valid_move(piece, from, to):
+          RETURN False
+        
+        # Handle special moves
+        IF is_castle(piece, from, to):
+          perform_castle(from, to)
+        ELIF is_en_passant(piece, from, to):
+          perform_en_passant(from, to)
+        
+        board[to] = piece
+        board[from] = None
+        
+        IF is_in_check(current_player):
+          undo_move()
+          RETURN False
+        
+        switch_player()
+        RETURN True
+    
+    CLASS AIEngine:
+      FUNCTION minimax(board, depth, alpha, beta, maximizing):
+        IF depth == 0 OR game_over(board):
+          RETURN evaluate_position(board)
+        
+        IF maximizing:
+          max_eval = -INFINITY
+          FOR each move in get_legal_moves(board):
+            board.make_move(move)
+            eval = minimax(board, depth-1, alpha, beta, False)
+            board.undo_move()
+            max_eval = MAX(max_eval, eval)
+            alpha = MAX(alpha, eval)
+            IF beta <= alpha:
+              BREAK
+          RETURN max_eval
+        ELSE:
+          min_eval = INFINITY
+          FOR each move in get_legal_moves(board):
+            board.make_move(move)
+            eval = minimax(board, depth-1, alpha, beta, True)
+            board.undo_move()
+            min_eval = MIN(min_eval, eval)
+            beta = MIN(beta, eval)
+            IF beta <= alpha:
+              BREAK
+          RETURN min_eval
+  
+  python: |
+    from enum import Enum
+    from typing import Optional, List, Tuple
+    import copy
+    
+    class PieceType(Enum):
+        PAWN = 1
+        KNIGHT = 2
+        BISHOP = 3
+        ROOK = 4
+        QUEEN = 5
+        KING = 6
+    
+    class Color(Enum):
+        WHITE = 1
+        BLACK = -1
+    
+    class Piece:
+        def __init__(self, piece_type: PieceType, color: Color):
+            self.type = piece_type
+            self.color = color
+            self.has_moved = False
+        
+        def __str__(self):
+            symbols = {
+                PieceType.PAWN: 'P', PieceType.KNIGHT: 'N',
+                PieceType.BISHOP: 'B', PieceType.ROOK: 'R',
+                PieceType.QUEEN: 'Q', PieceType.KING: 'K'
+            }
+            symbol = symbols[self.type]
+            return symbol if self.color == Color.WHITE else symbol.lower()
+    
+    class Board:
+        def __init__(self):
+            self.board = [[None for _ in range(8)] for _ in range(8)]
+            self.current_player = Color.WHITE
+            self.en_passant_target = None
+            self.halfmove_clock = 0
+            self.fullmove_number = 1
+            self.move_history = []
+            self._setup_initial_position()
+        
+        def _setup_initial_position(self):
+            # Setup pawns
+            for i in range(8):
+                self.board[1][i] = Piece(PieceType.PAWN, Color.WHITE)
+                self.board[6][i] = Piece(PieceType.PAWN, Color.BLACK)
+            
+            # Setup other pieces
+            piece_order = [PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP,
+                          PieceType.QUEEN, PieceType.KING, PieceType.BISHOP,
+                          PieceType.KNIGHT, PieceType.ROOK]
+            
+            for i, piece_type in enumerate(piece_order):
+                self.board[0][i] = Piece(piece_type, Color.WHITE)
+                self.board[7][i] = Piece(piece_type, Color.BLACK)
+        
+        def get_legal_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            piece = self.board[pos[0]][pos[1]]
+            if not piece or piece.color != self.current_player:
+                return []
+            
+            moves = []
+            if piece.type == PieceType.PAWN:
+                moves = self._get_pawn_moves(pos)
+            elif piece.type == PieceType.KNIGHT:
+                moves = self._get_knight_moves(pos)
+            elif piece.type == PieceType.BISHOP:
+                moves = self._get_bishop_moves(pos)
+            elif piece.type == PieceType.ROOK:
+                moves = self._get_rook_moves(pos)
+            elif piece.type == PieceType.QUEEN:
+                moves = self._get_queen_moves(pos)
+            elif piece.type == PieceType.KING:
+                moves = self._get_king_moves(pos)
+            
+            # Filter moves that leave king in check
+            legal_moves = []
+            for move in moves:
+                if self._is_legal_move(pos, move):
+                    legal_moves.append(move)
+            
+            return legal_moves
+        
+        def _get_pawn_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            moves = []
+            row, col = pos
+            piece = self.board[row][col]
+            direction = 1 if piece.color == Color.WHITE else -1
+            
+            # Forward move
+            if 0 <= row + direction < 8:
+                if not self.board[row + direction][col]:
+                    moves.append((row + direction, col))
+                    
+                    # Double move from starting position
+                    start_row = 1 if piece.color == Color.WHITE else 6
+                    if row == start_row and not self.board[row + 2*direction][col]:
+                        moves.append((row + 2*direction, col))
+                
+                # Captures
+                for dc in [-1, 1]:
+                    if 0 <= col + dc < 8:
+                        target = self.board[row + direction][col + dc]
+                        if target and target.color != piece.color:
+                            moves.append((row + direction, col + dc))
+                
+                # En passant
+                if self.en_passant_target == (row + direction, col + dc):
+                    moves.append((row + direction, col + dc))
+            
+            return moves
+        
+        def _get_knight_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            moves = []
+            knight_moves = [(-2,-1), (-2,1), (-1,-2), (-1,2),
+                           (1,-2), (1,2), (2,-1), (2,1)]
+            
+            for dr, dc in knight_moves:
+                new_row, new_col = pos[0] + dr, pos[1] + dc
+                if 0 <= new_row < 8 and 0 <= new_col < 8:
+                    target = self.board[new_row][new_col]
+                    if not target or target.color != self.board[pos[0]][pos[1]].color:
+                        moves.append((new_row, new_col))
+            
+            return moves
+        
+        def _get_sliding_moves(self, pos: Tuple[int, int], 
+                              directions: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+            moves = []
+            piece = self.board[pos[0]][pos[1]]
+            
+            for dr, dc in directions:
+                new_row, new_col = pos[0] + dr, pos[1] + dc
+                
+                while 0 <= new_row < 8 and 0 <= new_col < 8:
+                    target = self.board[new_row][new_col]
+                    
+                    if not target:
+                        moves.append((new_row, new_col))
+                    elif target.color != piece.color:
+                        moves.append((new_row, new_col))
+                        break
+                    else:
+                        break
+                    
+                    new_row += dr
+                    new_col += dc
+            
+            return moves
+        
+        def _get_bishop_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            return self._get_sliding_moves(pos, [(-1,-1), (-1,1), (1,-1), (1,1)])
+        
+        def _get_rook_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            return self._get_sliding_moves(pos, [(-1,0), (1,0), (0,-1), (0,1)])
+        
+        def _get_queen_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            return self._get_sliding_moves(pos, [(-1,-1), (-1,0), (-1,1), (0,-1),
+                                                 (0,1), (1,-1), (1,0), (1,1)])
+        
+        def _get_king_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            moves = []
+            king_moves = [(-1,-1), (-1,0), (-1,1), (0,-1),
+                         (0,1), (1,-1), (1,0), (1,1)]
+            
+            for dr, dc in king_moves:
+                new_row, new_col = pos[0] + dr, pos[1] + dc
+                if 0 <= new_row < 8 and 0 <= new_col < 8:
+                    target = self.board[new_row][new_col]
+                    if not target or target.color != self.board[pos[0]][pos[1]].color:
+                        moves.append((new_row, new_col))
+            
+            # Add castling moves
+            moves.extend(self._get_castling_moves(pos))
+            
+            return moves
+        
+        def _get_castling_moves(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+            moves = []
+            piece = self.board[pos[0]][pos[1]]
+            
+            if piece.has_moved or self.is_in_check():
+                return moves
+            
+            row = pos[0]
+            
+            # Kingside castling
+            rook = self.board[row][7]
+            if rook and rook.type == PieceType.ROOK and not rook.has_moved:
+                if all(self.board[row][col] is None for col in range(5, 7)):
+                    if not any(self.is_square_attacked((row, col)) for col in range(4, 7)):
+                        moves.append((row, 6))
+            
+            # Queenside castling
+            rook = self.board[row][0]
+            if rook and rook.type == PieceType.ROOK and not rook.has_moved:
+                if all(self.board[row][col] is None for col in range(1, 4)):
+                    if not any(self.is_square_attacked((row, col)) for col in range(2, 5)):
+                        moves.append((row, 2))
+            
+            return moves
+        
+        def _is_legal_move(self, from_pos: Tuple[int, int], 
+                          to_pos: Tuple[int, int]) -> bool:
+            # Make temporary move
+            temp_board = copy.deepcopy(self)
+            temp_board._make_move_unchecked(from_pos, to_pos)
+            
+            # Check if king is in check after move
+            return not temp_board.is_in_check()
+        
+        def _make_move_unchecked(self, from_pos: Tuple[int, int], 
+                                 to_pos: Tuple[int, int]):
+            piece = self.board[from_pos[0]][from_pos[1]]
+            self.board[to_pos[0]][to_pos[1]] = piece
+            self.board[from_pos[0]][from_pos[1]] = None
+            piece.has_moved = True
+        
+        def make_move(self, from_pos: Tuple[int, int], 
+                     to_pos: Tuple[int, int]) -> bool:
+            if to_pos not in self.get_legal_moves(from_pos):
+                return False
+            
+            piece = self.board[from_pos[0]][from_pos[1]]
+            captured = self.board[to_pos[0]][to_pos[1]]
+            
+            # Store move in history
+            self.move_history.append({
+                'from': from_pos,
+                'to': to_pos,
+                'piece': piece,
+                'captured': captured,
+                'en_passant_target': self.en_passant_target,
+                'halfmove_clock': self.halfmove_clock
+            })
+            
+            # Handle special moves
+            if piece.type == PieceType.KING and abs(to_pos[1] - from_pos[1]) == 2:
+                # Castling
+                if to_pos[1] == 6:  # Kingside
+                    self.board[to_pos[0]][5] = self.board[to_pos[0]][7]
+                    self.board[to_pos[0]][7] = None
+                else:  # Queenside
+                    self.board[to_pos[0]][3] = self.board[to_pos[0]][0]
+                    self.board[to_pos[0]][0] = None
+            
+            # Handle en passant capture
+            if piece.type == PieceType.PAWN and to_pos == self.en_passant_target:
+                capture_row = to_pos[0] - (1 if piece.color == Color.WHITE else -1)
+                self.board[capture_row][to_pos[1]] = None
+            
+            # Update en passant target
+            if piece.type == PieceType.PAWN and abs(to_pos[0] - from_pos[0]) == 2:
+                self.en_passant_target = ((to_pos[0] + from_pos[0]) // 2, to_pos[1])
+            else:
+                self.en_passant_target = None
+            
+            # Update halfmove clock
+            if piece.type == PieceType.PAWN or captured:
+                self.halfmove_clock = 0
+            else:
+                self.halfmove_clock += 1
+            
+            # Make the move
+            self._make_move_unchecked(from_pos, to_pos)
+            
+            # Handle pawn promotion
+            if piece.type == PieceType.PAWN:
+                if (piece.color == Color.WHITE and to_pos[0] == 7) or \
+                   (piece.color == Color.BLACK and to_pos[0] == 0):
+                    self.board[to_pos[0]][to_pos[1]] = Piece(PieceType.QUEEN, piece.color)
+            
+            # Switch player
+            self.current_player = Color.BLACK if self.current_player == Color.WHITE else Color.WHITE
+            
+            # Update fullmove number
+            if self.current_player == Color.WHITE:
+                self.fullmove_number += 1
+            
+            return True
+        
+        def undo_move(self) -> bool:
+            if not self.move_history:
+                return False
+            
+            last_move = self.move_history.pop()
+            
+            # Restore pieces
+            self.board[last_move['from'][0]][last_move['from'][1]] = last_move['piece']
+            self.board[last_move['to'][0]][last_move['to'][1]] = last_move['captured']
+            
+            # Restore piece state
+            last_move['piece'].has_moved = len([m for m in self.move_history 
+                                               if m['piece'] == last_move['piece']]) > 0
+            
+            # Restore game state
+            self.en_passant_target = last_move['en_passant_target']
+            self.halfmove_clock = last_move['halfmove_clock']
+            
+            # Switch player back
+            self.current_player = Color.BLACK if self.current_player == Color.WHITE else Color.WHITE
+            
+            # Update fullmove number
+            if self.current_player == Color.BLACK:
+                self.fullmove_number -= 1
+            
+            return True
+        
+        def is_square_attacked(self, pos: Tuple[int, int]) -> bool:
+            # Temporarily switch player to check attacks
+            self.current_player = Color.BLACK if self.current_player == Color.WHITE else Color.WHITE
+            
+            for row in range(8):
+                for col in range(8):
+                    piece = self.board[row][col]
+                    if piece and piece.color == self.current_player:
+                        if pos in self.get_legal_moves((row, col)):
+                            self.current_player = Color.BLACK if self.current_player == Color.WHITE else Color.WHITE
+                            return True
+            
+            self.current_player = Color.BLACK if self.current_player == Color.WHITE else Color.WHITE
+            return False
+        
+        def find_king(self, color: Color) -> Optional[Tuple[int, int]]:
+            for row in range(8):
+                for col in range(8):
+                    piece = self.board[row][col]
+                    if piece and piece.type == PieceType.KING and piece.color == color:
+                        return (row, col)
+            return None
+        
+        def is_in_check(self) -> bool:
+            king_pos = self.find_king(self.current_player)
+            if not king_pos:
+                return False
+            return self.is_square_attacked(king_pos)
+        
+        def is_checkmate(self) -> bool:
+            if not self.is_in_check():
+                return False
+            
+            # Check if any move can get out of check
+            for row in range(8):
+                for col in range(8):
+                    piece = self.board[row][col]
+                    if piece and piece.color == self.current_player:
+                        if self.get_legal_moves((row, col)):
+                            return False
+            
+            return True
+        
+        def is_stalemate(self) -> bool:
+            if self.is_in_check():
+                return False
+            
+            # Check if any legal move exists
+            for row in range(8):
+                for col in range(8):
+                    piece = self.board[row][col]
+                    if piece and piece.color == self.current_player:
+                        if self.get_legal_moves((row, col)):
+                            return False
+            
+            return True
+        
+        def is_draw(self) -> bool:
+            # 50-move rule
+            if self.halfmove_clock >= 100:
+                return True
+            
+            # Stalemate
+            if self.is_stalemate():
+                return True
+            
+            # Insufficient material
+            pieces = []
+            for row in range(8):
+                for col in range(8):
+                    if self.board[row][col]:
+                        pieces.append(self.board[row][col])
+            
+            if len(pieces) == 2:  # Only kings
+                return True
+            
+            if len(pieces) == 3:  # King vs King + Bishop/Knight
+                for piece in pieces:
+                    if piece.type in [PieceType.BISHOP, PieceType.KNIGHT]:
+                        return True
+            
+            return False
+        
+        def to_fen(self) -> str:
+            fen_rows = []
+            for row in range(7, -1, -1):
+                empty = 0
+                fen_row = ""
+                for col in range(8):
+                    piece = self.board[row][col]
+                    if piece:
+                        if empty > 0:
+                            fen_row += str(empty)
+                            empty = 0
+                        fen_row += str(piece)
+                    else:
+                        empty += 1
+                if empty > 0:
+                    fen_row += str(empty)
+                fen_rows.append(fen_row)
+            
+            board_fen = '/'.join(fen_rows)
+            active_color = 'w' if self.current_player == Color.WHITE else 'b'
+            
+            # Simplified castling rights (would need tracking)
+            castling = 'KQkq'
+            
+            en_passant = '-'
+            if self.en_passant_target:
+                en_passant = chr(ord('a') + self.en_passant_target[1]) + str(self.en_passant_target[0] + 1)
+            
+            return f"{board_fen} {active_color} {castling} {en_passant} {self.halfmove_clock} {self.fullmove_number}"
+        
+        def display(self):
+            print("  a b c d e f g h")
+            for row in range(7, -1, -1):
+                print(f"{row+1} ", end="")
+                for col in range(8):
+                    piece = self.board[row][col]
+                    if piece:
+                        print(str(piece), end=" ")
+                    else:
+                        print(".", end=" ")
+                print(f" {row+1}")
+            print("  a b c d e f g h")
+    
+    class AIEngine:
+        def __init__(self, depth: int = 3):
+            self.depth = depth
+            self.positions_evaluated = 0
+        
+        def evaluate_position(self, board: Board) -> float:
+            # Piece values
+            piece_values = {
+                PieceType.PAWN: 1,
+                PieceType.KNIGHT: 3,
+                PieceType.BISHOP: 3,
+                PieceType.ROOK: 5,
+                PieceType.QUEEN: 9,
+                PieceType.KING: 0
+            }
+            
+            # Position bonuses (simplified)
+            position_bonus = {
+                PieceType.PAWN: [
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+                    [0.1, 0.1, 0.2, 0.3, 0.3, 0.2, 0.1, 0.1],
+                    [0.05, 0.05, 0.1, 0.25, 0.25, 0.1, 0.05, 0.05],
+                    [0, 0, 0, 0.2, 0.2, 0, 0, 0],
+                    [0.05, -0.05, -0.1, 0, 0, -0.1, -0.05, 0.05],
+                    [0.05, 0.1, 0.1, -0.2, -0.2, 0.1, 0.1, 0.05],
+                    [0, 0, 0, 0, 0, 0, 0, 0]
+                ],
+                PieceType.KNIGHT: [
+                    [-0.5, -0.4, -0.3, -0.3, -0.3, -0.3, -0.4, -0.5],
+                    [-0.4, -0.2, 0, 0, 0, 0, -0.2, -0.4],
+                    [-0.3, 0, 0.1, 0.15, 0.15, 0.1, 0, -0.3],
+                    [-0.3, 0.05, 0.15, 0.2, 0.2, 0.15, 0.05, -0.3],
+                    [-0.3, 0, 0.15, 0.2, 0.2, 0.15, 0, -0.3],
+                    [-0.3, 0.05, 0.1, 0.15, 0.15, 0.1, 0.05, -0.3],
+                    [-0.4, -0.2, 0, 0.05, 0.05, 0, -0.2, -0.4],
+                    [-0.5, -0.4, -0.3, -0.3, -0.3, -0.3, -0.4, -0.5]
+                ]
+            }
+            
+            score = 0
+            
+            for row in range(8):
+                for col in range(8):
+                    piece = board.board[row][col]
+                    if piece:
+                        value = piece_values[piece.type]
+                        
+                        # Add position bonus
+                        if piece.type in position_bonus:
+                            if piece.color == Color.WHITE:
+                                value += position_bonus[piece.type][row][col]
+                            else:
+                                value += position_bonus[piece.type][7-row][col]
+                        
+                        if piece.color == Color.WHITE:
+                            score += value
+                        else:
+                            score -= value
+            
+            # Add bonuses for board control
+            if board.is_checkmate():
+                if board.current_player == Color.WHITE:
+                    score = -1000
+                else:
+                    score = 1000
+            elif board.is_in_check():
+                if board.current_player == Color.WHITE:
+                    score -= 0.5
+                else:
+                    score += 0.5
+            
+            return score
+        
+        def minimax(self, board: Board, depth: int, alpha: float, beta: float, 
+                   maximizing: bool) -> float:
+            self.positions_evaluated += 1
+            
+            # Terminal node evaluation
+            if depth == 0 or board.is_checkmate() or board.is_draw():
+                return self.evaluate_position(board)
+            
+            if maximizing:
+                max_eval = float('-inf')
+                for row in range(8):
+                    for col in range(8):
+                        piece = board.board[row][col]
+                        if piece and piece.color == Color.WHITE:
+                            moves = board.get_legal_moves((row, col))
+                            for move in moves:
+                                board_copy = copy.deepcopy(board)
+                                board_copy.make_move((row, col), move)
+                                eval_score = self.minimax(board_copy, depth - 1, 
+                                                        alpha, beta, False)
+                                max_eval = max(max_eval, eval_score)
+                                alpha = max(alpha, eval_score)
+                                if beta <= alpha:
+                                    break
+                return max_eval
+            else:
+                min_eval = float('inf')
+                for row in range(8):
+                    for col in range(8):
+                        piece = board.board[row][col]
+                        if piece and piece.color == Color.BLACK:
+                            moves = board.get_legal_moves((row, col))
+                            for move in moves:
+                                board_copy = copy.deepcopy(board)
+                                board_copy.make_move((row, col), move)
+                                eval_score = self.minimax(board_copy, depth - 1, 
+                                                        alpha, beta, True)
+                                min_eval = min(min_eval, eval_score)
+                                beta = min(beta, eval_score)
+                                if beta <= alpha:
+                                    break
+                return min_eval
+        
+        def get_best_move(self, board: Board) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+            self.positions_evaluated = 0
+            best_move = None
+            
+            if board.current_player == Color.WHITE:
+                max_eval = float('-inf')
+                for row in range(8):
+                    for col in range(8):
+                        piece = board.board[row][col]
+                        if piece and piece.color == Color.WHITE:
+                            moves = board.get_legal_moves((row, col))
+                            for move in moves:
+                                board_copy = copy.deepcopy(board)
+                                board_copy.make_move((row, col), move)
+                                eval_score = self.minimax(board_copy, self.depth - 1,
+                                                        float('-inf'), float('inf'), False)
+                                if eval_score > max_eval:
+                                    max_eval = eval_score
+                                    best_move = ((row, col), move)
+            else:
+                min_eval = float('inf')
+                for row in range(8):
+                    for col in range(8):
+                        piece = board.board[row][col]
+                        if piece and piece.color == Color.BLACK:
+                            moves = board.get_legal_moves((row, col))
+                            for move in moves:
+                                board_copy = copy.deepcopy(board)
+                                board_copy.make_move((row, col), move)
+                                eval_score = self.minimax(board_copy, self.depth - 1,
+                                                        float('-inf'), float('inf'), True)
+                                if eval_score < min_eval:
+                                    min_eval = eval_score
+                                    best_move = ((row, col), move)
+            
+            return best_move
+    
+    class ChessGame:
+        def __init__(self, ai_depth: int = 3):
+            self.board = Board()
+            self.ai = AIEngine(ai_depth)
+            self.is_ai_game = False
+        
+        def parse_move(self, move_str: str) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+            """Parse algebraic notation like 'e2e4' or 'e2-e4'"""
+            move_str = move_str.replace('-', '').strip()
+            
+            if len(move_str) != 4:
+                return None
+            
+            try:
+                from_col = ord(move_str[0]) - ord('a')
+                from_row = int(move_str[1]) - 1
+                to_col = ord(move_str[2]) - ord('a')
+                to_row = int(move_str[3]) - 1
+                
+                if all(0 <= x < 8 for x in [from_col, from_row, to_col, to_row]):
+                    return ((from_row, from_col), (to_row, to_col))
+            except:
+                pass
+            
+            return None
+        
+        def play(self):
+            print("Welcome to Chess!")
+            print("Enter moves in format: e2e4 or e2-e4")
+            print("Commands: 'quit', 'undo', 'ai' (to play against AI)")
+            print()
+            
+            while True:
+                self.board.display()
+                print(f"\nFEN: {self.board.to_fen()}")
+                
+                # Check game state
+                if self.board.is_checkmate():
+                    winner = "Black" if self.board.current_player == Color.WHITE else "White"
+                    print(f"Checkmate! {winner} wins!")
+                    break
+                
+                if self.board.is_draw():
+                    print("Game is a draw!")
+                    break
+                
+                if self.board.is_in_check():
+                    print("Check!")
+                
+                player = "White" if self.board.current_player == Color.WHITE else "Black"
+                
+                # AI move
+                if self.is_ai_game and self.board.current_player == Color.BLACK:
+                    print(f"{player}'s turn (AI thinking...)")
+                    ai_move = self.ai.get_best_move(self.board)
+                    if ai_move:
+                        from_pos, to_pos = ai_move
+                        from_str = chr(ord('a') + from_pos[1]) + str(from_pos[0] + 1)
+                        to_str = chr(ord('a') + to_pos[1]) + str(to_pos[0] + 1)
+                        print(f"AI plays: {from_str}{to_str}")
+                        self.board.make_move(from_pos, to_pos)
+                        print(f"Positions evaluated: {self.ai.positions_evaluated}")
+                    continue
+                
+                # Human move
+                move_input = input(f"{player}'s turn: ").strip().lower()
+                
+                if move_input == 'quit':
+                    print("Thanks for playing!")
+                    break
+                elif move_input == 'undo':
+                    if self.board.undo_move():
+                        print("Move undone.")
+                        if self.is_ai_game:
+                            self.board.undo_move()  # Undo AI move too
+                    else:
+                        print("No moves to undo.")
+                elif move_input == 'ai':
+                    self.is_ai_game = True
+                    print("AI mode activated. You play as White.")
+                else:
+                    parsed = self.parse_move(move_input)
+                    if parsed:
+                        from_pos, to_pos = parsed
+                        if not self.board.make_move(from_pos, to_pos):
+                            print("Invalid move. Try again.")
+                    else:
+                        print("Invalid format. Use: e2e4")
+    
+    if __name__ == "__main__":
+        game = ChessGame(ai_depth=3)
+        game.play()
+  
+  tests: |
+    import unittest
+    from chess import Board, Piece, PieceType, Color, AIEngine
+    
+    class TestChessPieces(unittest.TestCase):
+        def setUp(self):
+            self.board = Board()
+        
+        def test_initial_setup(self):
+            # Test white pieces
+            self.assertIsNotNone(self.board.board[0][4])
+            self.assertEqual(self.board.board[0][4].type, PieceType.KING)
+            self.assertEqual(self.board.board[0][4].color, Color.WHITE)
+            
+            # Test black pieces
+            self.assertIsNotNone(self.board.board[7][4])
+            self.assertEqual(self.board.board[7][4].type, PieceType.KING)
+            self.assertEqual(self.board.board[7][4].color, Color.BLACK)
+            
+            # Test pawns
+            for i in range(8):
+                self.assertEqual(self.board.board[1][i].type, PieceType.PAWN)
+                self.assertEqual(self.board.board[6][i].type, PieceType.PAWN)
+        
+        def test_pawn_moves(self):
+            # Test initial double move
+            moves = self.board.get_legal_moves((1, 4))
+            self.assertIn((2, 4), moves)
+            self.assertIn((3, 4), moves)
+            
+            # Make a move and test single move
+            self.board.make_move((1, 4), (3, 4))
+            self.board.make_move((6, 4), (4, 4))
+            moves = self.board.get_legal_moves((3, 4))
+            self.assertNotIn((5, 4), moves)  # Blocked by black pawn
+        
+        def test_knight_moves(self):
+            moves = self.board.get_legal_moves((0, 1))
+            self.assertIn((2, 0), moves)
+            self.assertIn((2, 2), moves)
+            self.assertEqual(len(moves), 2)
+        
+        def test_castling(self):
+            # Clear path for castling
+            self.board.board[0][1] = None
+            self.board.board[0][2] = None
+            self.board.board[0][3] = None
+            self.board.board[0][5] = None
+            self.board.board[0][6] = None
+            
+            # King should have castling moves
+            moves = self.board.get_legal_moves((0, 4))
+            self.assertIn((0, 2), moves)  # Queenside
+            self.assertIn((0, 6), moves)  # Kingside
+            
+            # Perform kingside castle
+            self.assertTrue(self.board.make_move((0, 4), (0, 6)))
+            self.assertIsNotNone(self.board.board[0][6])  # King
+            self.assertIsNotNone(self.board.board[0][5])  # Rook
+            self.assertIsNone(self.board.board[0][7])     # Rook moved
+    
+    class TestGameLogic(unittest.TestCase):
+        def setUp(self):
+            self.board = Board()
+        
+        def test_check_detection(self):
+            # Setup a check position
+            self.board.board = [[None for _ in range(8)] for _ in range(8)]
+            self.board.board[0][4] = Piece(PieceType.KING, Color.WHITE)
+            self.board.board[7][4] = Piece(PieceType.ROOK, Color.BLACK)
+            
+            self.assertTrue(self.board.is_in_check())
+        
+        def test_checkmate_detection(self):
+            # Setup a checkmate position (back rank mate)
+            self.board.board = [[None for _ in range(8)] for _ in range(8)]
+            self.board.board[0][4] = Piece(PieceType.KING, Color.WHITE)
+            self.board.board[0][5] = Piece(PieceType.PAWN, Color.WHITE)
+            self.board.board[0][6] = Piece(PieceType.PAWN, Color.WHITE)
+            self.board.board[0][3] = Piece(PieceType.PAWN, Color.WHITE)
+            self.board.board[7][4] = Piece(PieceType.ROOK, Color.BLACK)
+            
+            self.assertTrue(self.board.is_checkmate())
+        
+        def test_stalemate_detection(self):
+            # Setup a stalemate position
+            self.board.board = [[None for _ in range(8)] for _ in range(8)]
+            self.board.board[0][0] = Piece(PieceType.KING, Color.WHITE)
+            self.board.board[1][1] = Piece(PieceType.KING, Color.BLACK)
+            self.board.board[2][0] = Piece(PieceType.QUEEN, Color.BLACK)
+            
+            self.assertTrue(self.board.is_stalemate())
+        
+        def test_en_passant(self):
+            # Setup en passant scenario
+            self.board.board = [[None for _ in range(8)] for _ in range(8)]
+            self.board.board[4][4] = Piece(PieceType.PAWN, Color.WHITE)
+            self.board.board[6][3] = Piece(PieceType.PAWN, Color.BLACK)
+            
+            # Black pawn double move
+            self.board.current_player = Color.BLACK
+            self.board.make_move((6, 3), (4, 3))
+            
+            # White should be able to capture en passant
+            self.board.current_player = Color.WHITE
+            moves = self.board.get_legal_moves((4, 4))
+            self.assertIn((5, 3), moves)
+        
+        def test_promotion(self):
+            # Setup promotion scenario
+            self.board.board = [[None for _ in range(8)] for _ in range(8)]
+            self.board.board[6][0] = Piece(PieceType.PAWN, Color.WHITE)
+            
+            # Move pawn to promotion square
+            self.board.make_move((6, 0), (7, 0))
+            
+            # Check if pawn was promoted to queen
+            promoted = self.board.board[7][0]
+            self.assertEqual(promoted.type, PieceType.QUEEN)
+            self.assertEqual(promoted.color, Color.WHITE)
+        
+        def test_undo_move(self):
+            initial_fen = self.board.to_fen()
+            
+            # Make a move
+            self.board.make_move((1, 4), (3, 4))
+            moved_fen = self.board.to_fen()
+            self.assertNotEqual(initial_fen, moved_fen)
+            
+            # Undo the move
+            self.board.undo_move()
+            undone_fen = self.board.to_fen()
+            self.assertEqual(initial_fen.split()[0], undone_fen.split()[0])
+    
+    class TestAIEngine(unittest.TestCase):
+        def setUp(self):
+            self.board = Board()
+            self.ai = AIEngine(depth=2)
+        
+        def test_evaluation_function(self):
+            # Initial position should be roughly equal
+            score = self.ai.evaluate_position(self.board)
+            self.assertAlmostEqual(score, 0, delta=1)
+            
+            # Remove black queen
+            self.board.board[7][3] = None
+            score = self.ai.evaluate_position(self.board)
+            self.assertGreater(score, 8)  # White should be up ~9 points
+        
+        def test_ai_makes_legal_move(self):
+            move = self.ai.get_best_move(self.board)
+            self.assertIsNotNone(move)
+            
+            from_pos, to_pos = move
+            self.assertIn(to_pos, self.board.get_legal_moves(from_pos))
+        
+        def test_ai_avoids_checkmate(self):
+            # Setup position where AI needs to avoid checkmate
+            self.board.board = [[None for _ in range(8)] for _ in range(8)]
+            self.board.board[0][4] = Piece(PieceType.KING, Color.WHITE)
+            self.board.board[7][4] = Piece(PieceType.KING, Color.BLACK)
+            self.board.board[6][0] = Piece(PieceType.QUEEN, Color.WHITE)
+            self.board.board[6][1] = Piece(PieceType.QUEEN, Color.WHITE)
+            
+            self.board.current_player = Color.BLACK
+            move = self.ai.get_best_move(self.board)
+            
+            # AI should move king away from back rank
+            self.assertIsNotNone(move)
+            from_pos, to_pos = move
+            self.assertEqual(from_pos, (7, 4))  # Should move the king
+    
+    if __name__ == '__main__':
+        unittest.main()
+  
+  api: |
+    from flask import Flask, jsonify, request
+    from flask_cors import CORS
+    from chess import Board, AIEngine, Color
+    import json
+    
+    app = Flask(__name__)
+    CORS(app)
+    
+    # Store game sessions
+    games = {}
+    
+    @app.route('/api/new_game', methods=['POST'])
+    def new_game():
+        """Create a new game session"""
+        import uuid
+        game_id = str(uuid.uuid4())
+        
+        data = request.json
+        ai_enabled = data.get('ai', False)
+        ai_depth = data.get('ai_depth', 3)
+        
+        games[game_id] = {
+            'board': Board(),
+            'ai': AIEngine(ai_depth) if ai_enabled else None,
+            'ai_enabled': ai_enabled
+        }
+        
+        return jsonify({
+            'game_id': game_id,
+            'board': board_to_json(games[game_id]['board']),
+            'ai_enabled': ai_enabled
+        })
+    
+    @app.route('/api/game/<game_id>/move', methods=['POST'])
+    def make_move(game_id):
+        """Make a move in the game"""
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        data = request.json
+        from_pos = tuple(data['from'])
+        to_pos = tuple(data['to'])
+        
+        game = games[game_id]
+        board = game['board']
+        
+        # Validate and make move
+        if not board.make_move(from_pos, to_pos):
+            return jsonify({'error': 'Invalid move'}), 400
+        
+        response = {
+            'board': board_to_json(board),
+            'check': board.is_in_check(),
+            'checkmate': board.is_checkmate(),
+            'stalemate': board.is_stalemate(),
+            'draw': board.is_draw()
+        }
+        
+        # Make AI move if enabled and it's AI's turn
+        if game['ai_enabled'] and board.current_player == Color.BLACK and not board.is_checkmate():
+            ai_move = game['ai'].get_best_move(board)
+            if ai_move:
+                from_pos, to_pos = ai_move
+                board.make_move(from_pos, to_pos)
+                response['ai_move'] = {
+                    'from': list(from_pos),
+                    'to': list(to_pos)
+                }
+                response['board'] = board_to_json(board)
+                response['check'] = board.is_in_check()
+                response['checkmate'] = board.is_checkmate()
+                response['stalemate'] = board.is_stalemate()
+                response['draw'] = board.is_draw()
+        
+        return jsonify(response)
+    
+    @app.route('/api/game/<game_id>/legal_moves', methods=['GET'])
+    def get_legal_moves(game_id):
+        """Get legal moves for a piece"""
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        row = int(request.args.get('row'))
+        col = int(request.args.get('col'))
+        
+        board = games[game_id]['board']
+        moves = board.get_legal_moves((row, col))
+        
+        return jsonify({
+            'moves': [list(move) for move in moves]
+        })
+    
+    @app.route('/api/game/<game_id>/undo', methods=['POST'])
+    def undo_move(game_id):
+        """Undo the last move"""
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        board = games[game_id]['board']
+        
+        # Undo human move
+        if not board.undo_move():
+            return jsonify({'error': 'No moves to undo'}), 400
+        
+        # If AI game, also undo AI move
+        if games[game_id]['ai_enabled']:
+            board.undo_move()
+        
+        return jsonify({
+            'board': board_to_json(board)
+        })
+    
+    @app.route('/api/game/<game_id>/state', methods=['GET'])
+    def get_game_state(game_id):
+        """Get current game state"""
+        if game_id not in games:
+            return jsonify({'error': 'Game not found'}), 404
+        
+        board = games[game_id]['board']
+        
+        return jsonify({
+            'board': board_to_json(board),
+            'current_player': 'white' if board.current_player == Color.WHITE else 'black',
+            'check': board.is_in_check(),
+            'checkmate': board.is_checkmate(),
+            'stalemate': board.is_stalemate(),
+            'draw': board.is_draw(),
+            'fen': board.to_fen(),
+            'move_count': board.fullmove_number
+        })
+    
+    def board_to_json(board):
+        """Convert board to JSON-serializable format"""
+        board_array = []
+        for row in range(8):
+            row_array = []
+            for col in range(8):
+                piece = board.board[row][col]
+                if piece:
+                    row_array.append({
+                        'type': piece.type.name.lower(),
+                        'color': 'white' if piece.color == Color.WHITE else 'black'
+                    })
+                else:
+                    row_array.append(None)
+            board_array.append(row_array)
+        return board_array
+    
+    if __name__ == '__main__':
+        app.run(debug=True, port=5000)
+  
+  database: |
+    -- PostgreSQL schema for storing chess games
+    
+    CREATE TABLE players (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        rating INTEGER DEFAULT 1200,
+        games_played INTEGER DEFAULT 0,
+        games_won INTEGER DEFAULT 0,
+        games_drawn INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE TABLE games (
+        id SERIAL PRIMARY KEY,
+        white_player_id INTEGER REFERENCES players(id),
+        black_player_id INTEGER REFERENCES players(id),
+        pgn TEXT,
+        fen_final VARCHAR(100),
+        result VARCHAR(10), -- '1-0', '0-1', '1/2-1/2', '*'
+        termination VARCHAR(50), -- 'checkmate', 'stalemate', 'resignation', etc.
+        time_control VARCHAR(20),
+        opening_eco VARCHAR(10),
+        opening_name VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        ended_at TIMESTAMP
+    );
+    
+    CREATE TABLE moves (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
+        move_number INTEGER,
+        white_move VARCHAR(10),
+        black_move VARCHAR(10),
+        fen_after_white VARCHAR(100),
+        fen_after_black VARCHAR(100),
+        evaluation DECIMAL(5,2), -- Engine evaluation
+        time_spent_white INTEGER, -- milliseconds
+        time_spent_black INTEGER
+    );
+    
+    CREATE TABLE analysis (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
+        move_number INTEGER,
+        best_move VARCHAR(10),
+        evaluation DECIMAL(5,2),
+        depth INTEGER,
+        analysis_text TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    -- Indexes for performance
+    CREATE INDEX idx_games_white_player ON games(white_player_id);
+    CREATE INDEX idx_games_black_player ON games(black_player_id);
+    CREATE INDEX idx_games_created_at ON games(created_at);
+    CREATE INDEX idx_moves_game_id ON moves(game_id);
+    CREATE INDEX idx_analysis_game_id ON analysis(game_id);
+    
+    -- View for player statistics
+    CREATE VIEW player_stats AS
+    SELECT 
+        p.id,
+        p.username,
+        p.rating,
+        p.games_played,
+        p.games_won,
+        p.games_drawn,
+        CASE 
+            WHEN p.games_played > 0 
+            THEN ROUND((p.games_won::DECIMAL / p.games_played) * 100, 2)
+            ELSE 0 
+        END AS win_percentage,
+        COUNT(DISTINCT g1.id) AS games_as_white,
+        COUNT(DISTINCT g2.id) AS games_as_black
+    FROM players p
+    LEFT JOIN games g1 ON p.id = g1.white_player_id
+    LEFT JOIN games g2 ON p.id = g2.black_player_id
+    GROUP BY p.id, p.username, p.rating, p.games_played, p.games_won, p.games_drawn;
+  
+  deployment: |
+    # Dockerfile
+    FROM python:3.9-slim
+    
+    WORKDIR /app
+    
+    # Install dependencies
+    COPY requirements.txt .
+    RUN pip install --no-cache-dir -r requirements.txt
+    
+    # Copy application
+    COPY chess.py .
+    COPY chess_api.py .
+    
+    # Expose port
+    EXPOSE 5000
+    
+    # Run the application
+    CMD ["python", "chess_api.py"]
+    
+    ---
+    # requirements.txt
+    flask==2.3.2
+    flask-cors==4.0.0
+    psycopg2-binary==2.9.6
+    redis==4.5.5
+    gunicorn==20.1.0
+    
+    ---
+    # docker-compose.yml
+    version: '3.8'
+    
+    services:
+      chess-api:
+        build: .
+        ports:
+          - "5000:5000"
+        environment:
+          - DATABASE_URL=postgresql://chess:chess@db:5432/chessdb
+          - REDIS_URL=redis://redis:6379
+        depends_on:
+          - db
+          - redis
+        volumes:
+          - ./:/app
+        command: gunicorn -w 4 -b 0.0.0.0:5000 chess_api:app
+      
+      db:
+        image: postgres:14
+        environment:
+          - POSTGRES_USER=chess
+          - POSTGRES_PASSWORD=chess
+          - POSTGRES_DB=chessdb
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+          - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+        ports:
+          - "5432:5432"
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "6379:6379"
+      
+      nginx:
+        image: nginx:alpine
+        ports:
+          - "80:80"
+        volumes:
+          - ./nginx.conf:/etc/nginx/nginx.conf
+        depends_on:
+          - chess-api
+    
+    volumes:
+      postgres_data:
+    
+    ---
+    # nginx.conf
+    events {
+        worker_connections 1024;
+    }
+    
+    http {
+        upstream chess_api {
+            server chess-api:5000;
+        }
+        
+        server {
+            listen 80;
+            server_name localhost;
+            
+            location /api {
+                proxy_pass http://chess_api;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+            
+            location / {
+                root /usr/share/nginx/html;
+                try_files $uri $uri/ /index.html;
+            }
+        }
+    }
+    
+    ---
+    # .github/workflows/ci.yml
+    name: Chess CI/CD
+    
+    on:
+      push:
+        branches: [ main ]
+      pull_request:
+        branches: [ main ]
+    
+    jobs:
+      test:
+        runs-on: ubuntu-latest
+        
+        steps:
+        - uses: actions/checkout@v3
+        
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: '3.9'
+        
+        - name: Install dependencies
+          run: |
+            pip install -r requirements.txt
+            pip install pytest pytest-cov
+        
+        - name: Run tests
+          run: |
+            pytest tests.py --cov=chess --cov-report=xml
+        
+        - name: Upload coverage
+          uses: codecov/codecov-action@v3
+          with:
+            file: ./coverage.xml
+      
+      docker:
+        needs: test
+        runs-on: ubuntu-latest
+        if: github.event_name == 'push'
+        
+        steps:
+        - uses: actions/checkout@v3
+        
+        - name: Build and push Docker image
+          uses: docker/build-push-action@v4
+          with:
+            context: .
+            push: true
+            tags: |
+              ghcr.io/${{ github.repository }}:latest
+              ghcr.io/${{ github.repository }}:${{ github.sha }}
+  
+  json: |
+    {
+      "game_config": {
+        "time_controls": [
+          {"name": "Bullet", "time": 60, "increment": 0},
+          {"name": "Blitz", "time": 300, "increment": 2},
+          {"name": "Rapid", "time": 600, "increment": 5},
+          {"name": "Classical", "time": 1800, "increment": 10}
+        ],
+        "ai_levels": [
+          {"name": "Beginner", "depth": 1, "rating": 800},
+          {"name": "Intermediate", "depth": 3, "rating": 1200},
+          {"name": "Advanced", "depth": 5, "rating": 1600},
+          {"name": "Expert", "depth": 7, "rating": 2000}
+        ],
+        "themes": {
+          "boards": [
+            {"name": "Classic", "light": "#F0D9B5", "dark": "#B58863"},
+            {"name": "Green", "light": "#FFFFDD", "dark": "#86A666"},
+            {"name": "Blue", "light": "#D2E4FC", "dark": "#4B7FCC"}
+          ],
+          "pieces": [
+            {"name": "Classic", "set": "classic"},
+            {"name": "Modern", "set": "modern"},
+            {"name": "3D", "set": "3d"}
+          ]
+        }
+      },
+      "openings": [
+        {
+          "eco": "B00",
+          "name": "King's Pawn",
+          "moves": ["e2e4"],
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        },
+        {
+          "eco": "C00",
+          "name": "French Defense",
+          "moves": ["e2e4", "e7e6"],
+          "fen": "rnbqkbnr/pppp1ppp/4p3/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+        },
+        {
+          "eco": "B01",
+          "name": "Scandinavian Defense",
+          "moves": ["e2e4", "d7d5"],
+          "fen": "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 2"
+        }
+      ],
+      "endgame_positions": [
+        {
+          "name": "King and Queen vs King",
+          "fen": "8/8/8/4k3/8/8/8/4K2Q w - - 0 1",
+          "result": "1-0",
+          "moves_to_mate": 10
+        },
+        {
+          "name": "King and Rook vs King",
+          "fen": "8/8/8/4k3/8/8/8/R3K3 w - - 0 1",
+          "result": "1-0",
+          "moves_to_mate": 16
+        }
+      ]
+    }
+```
